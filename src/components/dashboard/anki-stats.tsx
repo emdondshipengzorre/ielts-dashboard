@@ -16,24 +16,30 @@ interface AnkiStatsProps {
 export function AnkiStatsWidget({ stats, isLoading, onRefresh }: AnkiStatsProps) {
   const [setupStatus, setSetupStatus] = useState<string | null>(null);
   const [settingUp, setSettingUp] = useState(false);
+  const [progress, setProgress] = useState<{ added: number; total: number } | null>(null);
 
-  const hasIeltsDeck = stats.decks.some((d) => d.startsWith("IELTS::"));
+  const ieltsDecks = stats.decks.filter((d) => d.startsWith("IELTS::"));
+  const hasFullSetup = ieltsDecks.length >= 15;
 
   async function handleSetupDecks() {
     setSettingUp(true);
     setSetupStatus(null);
+    setProgress(null);
     try {
-      const result = await setupIeltsDecks();
-      if (result.errors.length > 0) {
-        setSetupStatus(`Created ${result.cardsAdded} cards. Some duplicates skipped.`);
-      } else {
-        setSetupStatus(`Created ${result.decksCreated.length} decks with ${result.cardsAdded} cards.`);
-      }
+      const result = await setupIeltsDecks((_, added, total) => {
+        setProgress({ added, total });
+      });
+      const skipped = result.totalCards - result.cardsAdded;
+      setSetupStatus(
+        `${result.decksCreated.length} decks, ${result.cardsAdded} cards added` +
+        (skipped > 0 ? ` (${skipped} duplicates skipped)` : "")
+      );
       onRefresh?.();
     } catch (err) {
       setSetupStatus(err instanceof Error ? err.message : "Setup failed");
     } finally {
       setSettingUp(false);
+      setProgress(null);
     }
   }
 
@@ -77,17 +83,32 @@ export function AnkiStatsWidget({ stats, isLoading, onRefresh }: AnkiStatsProps)
                 </p>
               </div>
             </div>
-            {!hasIeltsDeck && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="w-full gap-1.5"
-                onClick={handleSetupDecks}
-                disabled={settingUp}
-              >
-                <BookOpen className="size-3.5" />
-                {settingUp ? "Creating decks…" : "Setup IELTS Decks"}
-              </Button>
+            {!hasFullSetup && (
+              <div className="space-y-1.5">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full gap-1.5"
+                  onClick={handleSetupDecks}
+                  disabled={settingUp}
+                >
+                  <BookOpen className="size-3.5" />
+                  {settingUp ? "Loading cards…" : ieltsDecks.length > 0 ? "Load All IELTS Decks" : "Setup IELTS Decks"}
+                </Button>
+                {progress && (
+                  <div className="space-y-1">
+                    <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                      <div
+                        className="h-full bg-primary rounded-full transition-all duration-300"
+                        style={{ width: `${Math.round((progress.added / progress.total) * 100)}%` }}
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground text-center">
+                      {progress.added} / {progress.total} cards
+                    </p>
+                  </div>
+                )}
+              </div>
             )}
             {setupStatus && (
               <p className="text-xs text-muted-foreground">{setupStatus}</p>
