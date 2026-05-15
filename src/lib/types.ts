@@ -63,6 +63,7 @@ export interface StudySession {
   createdAt: string;
   updatedAt: string;
   sourceCheckoffId?: string;
+  sourceDailyPlan?: string;  // ISO date string of the daily plan this came from
 }
 
 export interface Milestone {
@@ -115,6 +116,7 @@ export interface DailyPlan {
   motivationalNote: string;
   totalPlannedHours: number;
   generatedAt: string;
+  completedTasks?: number[];  // indices of completed tasks
 }
 
 export interface AnkiStats {

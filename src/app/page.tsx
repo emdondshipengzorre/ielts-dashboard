@@ -30,7 +30,7 @@ export default function DashboardPage() {
   }, []);
 
   const { stats: ankiStats, isLoading: ankiLoading, refresh: refreshAnki } = useAnki();
-  const { plan, isLoading: planLoading, error: planError, regenerate } = useDailyPlan(ankiStats);
+  const { plan, isLoading: planLoading, error: planError, regenerate, toggleTask } = useDailyPlan(ankiStats);
 
   const stats = useLiveQuery(async () => {
     const sessions = await db.sessions.toArray();
@@ -96,6 +96,7 @@ export default function DashboardPage() {
           isLoading={planLoading}
           error={planError}
           onRegenerate={regenerate}
+          onToggleTask={toggleTask}
         />
 
         {/* Phase Indicator */}

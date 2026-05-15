@@ -5,7 +5,7 @@ import { useLiveQuery } from "dexie-react-hooks";
 import { db } from "@/lib/storage";
 import { getPlanConfig, getCurrentPhase, getElapsedMonths, getWeekStart, computeStreak } from "@/lib/utils";
 import { SKILLS } from "@/lib/types";
-import type { DailyPlan, AnkiStats } from "@/lib/types";
+import type { DailyPlan, AnkiStats, Location } from "@/lib/types";
 
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
@@ -126,10 +126,70 @@ export function useDailyPlan(ankiStats: AnkiStats | null) {
     }
   }, [studyContext, plan, generate]);
 
+  const toggleTask = useCallback(async (taskIndex: number, checked: boolean) => {
+    if (!plan) return;
+
+    const task = plan.tasks[taskIndex];
+    if (!task) return;
+
+    const today = new Date().toISOString().slice(0, 10);
+    const now = new Date().toISOString();
+    const config = getPlanConfig();
+    const currentPhase = getCurrentPhase(config.startDate);
+    const location: Location = new Date().getTimezoneOffset() <= -420 ? "beijing" : "manila";
+
+    // Parse duration string to hours (e.g. "30 min" -> 0.5, "1 hour" -> 1.0, "1.5 hours" -> 1.5)
+    const parseDuration = (dur: string): number => {
+      const lower = dur.toLowerCase().trim();
+      const hourMatch = lower.match(/([\d.]+)\s*h/);
+      const minMatch = lower.match(/([\d.]+)\s*m/);
+      let hours = 0;
+      if (hourMatch) hours += parseFloat(hourMatch[1]);
+      if (minMatch) hours += parseFloat(minMatch[1]) / 60;
+      if (hours === 0) hours = 0.5; // fallback
+      return Math.round(hours * 100) / 100;
+    };
+
+    if (checked) {
+      // Create a StudySession
+      await db.sessions.add({
+        id: crypto.randomUUID(),
+        date: today,
+        skill: task.skill,
+        activity: task.activity,
+        hours: parseDuration(task.duration),
+        location,
+        phase: currentPhase,
+        sourceDailyPlan: today,
+        createdAt: now,
+        updatedAt: now,
+      });
+    } else {
+      // Delete the auto-logged session for this task
+      const sessions = await db.sessions
+        .where("sourceDailyPlan")
+        .equals(today)
+        .toArray();
+      const match = sessions.find((s) => s.activity === task.activity);
+      if (match) await db.sessions.delete(match.id);
+    }
+
+    // Update completedTasks in state and localStorage
+    const prev = plan.completedTasks ?? [];
+    const next = checked
+      ? [...prev, taskIndex]
+      : prev.filter((i) => i !== taskIndex);
+
+    const updatedPlan: DailyPlan = { ...plan, completedTasks: next };
+    setPlan(updatedPlan);
+    cachePlan(updatedPlan);
+  }, [plan]);
+
   return {
     plan,
     isLoading,
     error,
     regenerate: () => generate(true),
+    toggleTask,
   };
 }

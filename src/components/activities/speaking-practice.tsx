@@ -1,10 +1,11 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Mic, RotateCcw, ChevronRight } from "lucide-react";
+import { Mic, RotateCcw, ChevronRight, Send, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import type { Phase } from "@/lib/types";
 
 const PART1_TOPICS = [
   { topic: "Hometown", questions: ["Where is your hometown?", "What do you like about it?", "Has it changed much recently?", "Would you recommend it to visitors?"] },
@@ -24,13 +25,36 @@ const PART2_CARDS = [
 
 type Part = 1 | 2 | 3;
 
-export function SpeakingPractice() {
+interface SpeakingFeedback {
+  overallBand: number;
+  criteria: {
+    fluencyCoherence: number;
+    lexicalResource: number;
+    grammaticalRange: number;
+    pronunciation: number;
+  };
+  strengths: string[];
+  improvements: string[];
+  modelAnswer: string;
+  tips: string;
+}
+
+interface SpeakingPracticeProps {
+  phase?: Phase;
+}
+
+export function SpeakingPractice({ phase = 1 }: SpeakingPracticeProps) {
   const [part, setPart] = useState<Part>(1);
   const [topicIndex, setTopicIndex] = useState(0);
   const [cardIndex, setCardIndex] = useState(0);
   const [seconds, setSeconds] = useState(0);
   const [isRunning, setIsRunning] = useState(false);
   const [questionIndex, setQuestionIndex] = useState(0);
+
+  const [responseText, setResponseText] = useState("");
+  const [feedback, setFeedback] = useState<SpeakingFeedback | null>(null);
+  const [isEvaluating, setIsEvaluating] = useState(false);
+  const [evalError, setEvalError] = useState<string | null>(null);
 
   const timeLimit = part === 1 ? 5 * 60 : part === 2 ? 2 * 60 : 5 * 60;
   const prepTime = part === 2 ? 60 : 0;
@@ -57,107 +81,274 @@ export function SpeakingPractice() {
     if (part === 1) setTopicIndex((i) => (i + 1) % PART1_TOPICS.length);
     if (part === 2) setCardIndex((i) => (i + 1) % PART2_CARDS.length);
     reset();
+    setResponseText("");
+    setFeedback(null);
+    setEvalError(null);
+  }
+
+  function getCurrentTopic(): string {
+    if (part === 1) {
+      const topic = PART1_TOPICS[topicIndex];
+      return topic.questions[questionIndex] ?? topic.topic;
+    }
+    if (part === 2) {
+      return PART2_CARDS[cardIndex].cue;
+    }
+    return "Discussion questions related to Part 2";
+  }
+
+  async function evaluateResponse() {
+    setIsEvaluating(true);
+    setEvalError(null);
+    setFeedback(null);
+
+    try {
+      const res = await fetch("/api/evaluate-speaking", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          part,
+          topic: getCurrentTopic(),
+          response: responseText,
+          phase,
+        }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error ?? `Request failed (${res.status})`);
+      }
+
+      const data: SpeakingFeedback = await res.json();
+      setFeedback(data);
+    } catch (err) {
+      setEvalError(err instanceof Error ? err.message : "Failed to get feedback");
+    } finally {
+      setIsEvaluating(false);
+    }
   }
 
   const topic = PART1_TOPICS[topicIndex];
   const card = PART2_CARDS[cardIndex];
   const overTime = seconds > timeLimit;
 
-  return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <CardTitle>Speaking Practice</CardTitle>
-          <Badge variant={overTime ? "destructive" : "secondary"} className="tabular-nums">
-            {formatTime(seconds)} / {formatTime(timeLimit)}
-          </Badge>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="flex gap-1">
-          {([1, 2, 3] as Part[]).map((p) => (
-            <Button
-              key={p}
-              variant={part === p ? "default" : "outline"}
-              size="sm"
-              onClick={() => { setPart(p); reset(); }}
-            >
-              Part {p}
-            </Button>
-          ))}
-        </div>
+  function bandColor(band: number): string {
+    if (band >= 7) return "text-green-400";
+    if (band >= 6) return "text-yellow-400";
+    if (band >= 5) return "text-orange-400";
+    return "text-red-400";
+  }
 
-        {part === 1 && (
-          <div className="space-y-3">
-            <p className="text-sm font-medium">Topic: {topic.topic}</p>
-            <div className="space-y-2">
-              {topic.questions.map((q, i) => (
-                <div
-                  key={i}
-                  className={`rounded-lg border p-2 text-sm ${
-                    i === questionIndex ? "border-primary bg-primary/5" : "border-border/50"
-                  }`}
-                >
-                  {q}
-                </div>
-              ))}
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle>Speaking Practice</CardTitle>
+            <Badge variant={overTime ? "destructive" : "secondary"} className="tabular-nums">
+              {formatTime(seconds)} / {formatTime(timeLimit)}
+            </Badge>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex gap-1">
+            {([1, 2, 3] as Part[]).map((p) => (
+              <Button
+                key={p}
+                variant={part === p ? "default" : "outline"}
+                size="sm"
+                onClick={() => { setPart(p); reset(); setResponseText(""); setFeedback(null); setEvalError(null); }}
+              >
+                Part {p}
+              </Button>
+            ))}
+          </div>
+
+          {part === 1 && (
+            <div className="space-y-3">
+              <p className="text-sm font-medium">Topic: {topic.topic}</p>
+              <div className="space-y-2">
+                {topic.questions.map((q, i) => (
+                  <div
+                    key={i}
+                    className={`rounded-lg border p-2 text-sm ${
+                      i === questionIndex ? "border-primary bg-primary/5" : "border-border/50"
+                    }`}
+                  >
+                    {q}
+                  </div>
+                ))}
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setQuestionIndex((i) => Math.min(i + 1, topic.questions.length - 1))}
+                disabled={questionIndex >= topic.questions.length - 1}
+                className="gap-1.5"
+              >
+                <ChevronRight className="size-3.5" />
+                Next Question
+              </Button>
             </div>
+          )}
+
+          {part === 2 && (
+            <div className="space-y-3">
+              <div className="rounded-lg bg-muted/50 p-3">
+                <p className="text-sm font-medium">{card.cue}</p>
+                <p className="text-xs text-muted-foreground mt-2">You should say:</p>
+                <ul className="mt-1 space-y-0.5">
+                  {card.points.map((p, i) => (
+                    <li key={i} className="text-xs text-muted-foreground">• {p}</li>
+                  ))}
+                </ul>
+              </div>
+              {seconds < prepTime && isRunning && (
+                <Badge variant="secondary">Preparation: {formatTime(prepTime - seconds)} remaining</Badge>
+              )}
+            </div>
+          )}
+
+          {part === 3 && (
+            <div className="rounded-lg bg-muted/50 p-3">
+              <p className="text-sm font-medium">Discussion questions related to Part 2:</p>
+              <p className="text-sm text-muted-foreground mt-2">
+                Think about broader themes from your Part 2 answer. Discuss causes, effects, comparisons,
+                and give your opinion with supporting examples.
+              </p>
+            </div>
+          )}
+
+          <div className="flex gap-2">
             <Button
-              variant="outline"
+              variant={isRunning ? "outline" : "default"}
               size="sm"
-              onClick={() => setQuestionIndex((i) => Math.min(i + 1, topic.questions.length - 1))}
-              disabled={questionIndex >= topic.questions.length - 1}
+              onClick={() => setIsRunning(!isRunning)}
               className="gap-1.5"
             >
-              <ChevronRight className="size-3.5" />
-              Next Question
+              <Mic className={`size-3.5 ${isRunning ? "text-red-400 animate-pulse" : ""}`} />
+              {isRunning ? "Stop" : "Start Speaking"}
+            </Button>
+            <Button variant="outline" size="sm" onClick={nextTopic} className="gap-1.5">
+              <RotateCcw className="size-3.5" />
+              New Topic
             </Button>
           </div>
-        )}
 
-        {part === 2 && (
-          <div className="space-y-3">
-            <div className="rounded-lg bg-muted/50 p-3">
-              <p className="text-sm font-medium">{card.cue}</p>
-              <p className="text-xs text-muted-foreground mt-2">You should say:</p>
-              <ul className="mt-1 space-y-0.5">
-                {card.points.map((p, i) => (
-                  <li key={i} className="text-xs text-muted-foreground">• {p}</li>
-                ))}
-              </ul>
-            </div>
-            {seconds < prepTime && isRunning && (
-              <Badge variant="secondary">Preparation: {formatTime(prepTime - seconds)} remaining</Badge>
+          {/* Response input and AI feedback section */}
+          <div className="space-y-3 border-t pt-4">
+            <p className="text-sm font-medium">AI Feedback</p>
+            <textarea
+              className="w-full min-h-[120px] rounded-lg border border-border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring resize-y"
+              placeholder="Type your speaking response here for AI feedback..."
+              value={responseText}
+              onChange={(e) => setResponseText(e.target.value)}
+            />
+
+            {responseText.trim().length > 20 && (
+              <Button
+                size="sm"
+                onClick={evaluateResponse}
+                disabled={isEvaluating}
+                className="gap-1.5"
+              >
+                {isEvaluating ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <Send className="size-3.5" />
+                )}
+                {isEvaluating ? "Evaluating..." : "Get AI Feedback"}
+              </Button>
+            )}
+
+            {evalError && (
+              <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-3">
+                <p className="text-sm text-red-400">{evalError}</p>
+              </div>
+            )}
+
+            {isEvaluating && (
+              <div className="space-y-3">
+                <div className="h-8 w-32 animate-pulse rounded-lg bg-muted" />
+                <div className="grid grid-cols-2 gap-2">
+                  {[1, 2, 3, 4].map((i) => (
+                    <div key={i} className="h-6 animate-pulse rounded-lg bg-muted" />
+                  ))}
+                </div>
+                <div className="space-y-2">
+                  {[1, 2, 3].map((i) => (
+                    <div key={i} className="h-4 animate-pulse rounded-lg bg-muted" style={{ width: `${80 - i * 10}%` }} />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {feedback && !isEvaluating && (
+              <div className="space-y-4">
+                {/* Overall Band */}
+                <div className="flex items-center gap-3">
+                  <span className="text-sm text-muted-foreground">Overall Band:</span>
+                  <span className={`text-2xl font-bold ${bandColor(feedback.overallBand)}`}>
+                    {feedback.overallBand}
+                  </span>
+                </div>
+
+                {/* Criteria Scores */}
+                <div className="grid grid-cols-2 gap-2">
+                  {([
+                    ["Fluency & Coherence", feedback.criteria.fluencyCoherence],
+                    ["Lexical Resource", feedback.criteria.lexicalResource],
+                    ["Grammatical Range", feedback.criteria.grammaticalRange],
+                    ["Pronunciation", feedback.criteria.pronunciation],
+                  ] as const).map(([label, score]) => (
+                    <div key={label} className="flex items-center justify-between rounded-lg border border-border/50 px-3 py-1.5">
+                      <span className="text-xs text-muted-foreground">{label}</span>
+                      <span className={`text-sm font-semibold ${bandColor(score)}`}>{score}</span>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Strengths */}
+                {feedback.strengths.length > 0 && (
+                  <div className="rounded-lg border border-green-500/20 bg-green-500/5 p-3 space-y-1.5">
+                    <p className="text-xs font-medium text-green-400">Strengths</p>
+                    <ul className="space-y-1">
+                      {feedback.strengths.map((s, i) => (
+                        <li key={i} className="text-sm text-green-300/90">+ {s}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Improvements */}
+                {feedback.improvements.length > 0 && (
+                  <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 space-y-1.5">
+                    <p className="text-xs font-medium text-amber-400">Areas for Improvement</p>
+                    <ul className="space-y-1">
+                      {feedback.improvements.map((s, i) => (
+                        <li key={i} className="text-sm text-amber-300/90">- {s}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Model Answer */}
+                <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 space-y-1.5">
+                  <p className="text-xs font-medium text-primary">Band 7+ Model Answer</p>
+                  <p className="text-sm leading-relaxed">{feedback.modelAnswer}</p>
+                </div>
+
+                {/* Tip */}
+                {feedback.tips && (
+                  <div className="rounded-lg bg-muted/50 p-3">
+                    <p className="text-sm"><span className="font-medium">Tip:</span> {feedback.tips}</p>
+                  </div>
+                )}
+              </div>
             )}
           </div>
-        )}
-
-        {part === 3 && (
-          <div className="rounded-lg bg-muted/50 p-3">
-            <p className="text-sm font-medium">Discussion questions related to Part 2:</p>
-            <p className="text-sm text-muted-foreground mt-2">
-              Think about broader themes from your Part 2 answer. Discuss causes, effects, comparisons,
-              and give your opinion with supporting examples.
-            </p>
-          </div>
-        )}
-
-        <div className="flex gap-2">
-          <Button
-            variant={isRunning ? "outline" : "default"}
-            size="sm"
-            onClick={() => setIsRunning(!isRunning)}
-            className="gap-1.5"
-          >
-            <Mic className={`size-3.5 ${isRunning ? "text-red-400 animate-pulse" : ""}`} />
-            {isRunning ? "Stop" : "Start Speaking"}
-          </Button>
-          <Button variant="outline" size="sm" onClick={nextTopic} className="gap-1.5">
-            <RotateCcw className="size-3.5" />
-            New Topic
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
+        </CardContent>
+      </Card>
+    </div>
   );
 }

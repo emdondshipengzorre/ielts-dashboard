@@ -36,7 +36,7 @@ export default function PracticePage() {
           </TabsContent>
 
           <TabsContent value="speaking" className="mt-4">
-            <SpeakingPractice />
+            <SpeakingPractice phase={currentPhase} />
           </TabsContent>
         </Tabs>
       </div>

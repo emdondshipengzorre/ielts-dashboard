@@ -21,6 +21,12 @@ class IeltsDatabase extends Dexie {
       scheduleItems: "id, dayOfWeek, location",
       weeklyCheckoffs: "id, weekStart, scheduleItemId, [weekStart+scheduleItemId]",
     });
+    this.version(3).stores({
+      sessions: "id, date, skill, location, phase, createdAt, sourceCheckoffId, sourceDailyPlan",
+      milestones: "id, month, phase, completed",
+      scheduleItems: "id, dayOfWeek, location",
+      weeklyCheckoffs: "id, weekStart, scheduleItemId, [weekStart+scheduleItemId]",
+    });
   }
 }
 
