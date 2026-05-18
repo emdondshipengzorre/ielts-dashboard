@@ -235,7 +235,7 @@ export default function AnalyticsPage() {
                   <YAxis tick={{ fontSize: 12 }} stroke="hsl(var(--muted-foreground))" unit="h" />
                   <Tooltip
                     contentStyle={tooltipStyle}
-                    formatter={(value: number, name: string) => [
+                    formatter={(value, name) => [
                       `${value}h`,
                       SKILL_LABELS[name as keyof typeof SKILL_LABELS] ?? name,
                     ]}
