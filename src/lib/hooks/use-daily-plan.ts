@@ -31,6 +31,27 @@ export function useDailyPlan(ankiStats: AnkiStats | null) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    const cached = getCachedPlan();
+    if (!cached?.completedTasks?.length) return;
+    const today = new Date().toISOString().slice(0, 10);
+    db.sessions
+      .where("sourceDailyPlan")
+      .equals(today)
+      .toArray()
+      .then((sessions) => {
+        const sessionActivities = new Set(sessions.map((s) => s.activity));
+        const valid = cached.completedTasks!.filter(
+          (i) => cached.tasks[i] && sessionActivities.has(cached.tasks[i].activity)
+        );
+        if (valid.length !== cached.completedTasks!.length) {
+          const updated = { ...cached, completedTasks: valid };
+          setPlan(updated);
+          cachePlan(updated);
+        }
+      });
+  }, []);
+
   const studyContext = useLiveQuery(async () => {
     const sessions = await db.sessions.toArray();
     const config = getPlanConfig();
@@ -138,7 +159,6 @@ export function useDailyPlan(ankiStats: AnkiStats | null) {
     const currentPhase = getCurrentPhase(config.startDate);
     const location: Location = new Date().getTimezoneOffset() <= -420 ? "beijing" : "manila";
 
-    // Parse duration string to hours (e.g. "30 min" -> 0.5, "1 hour" -> 1.0, "1.5 hours" -> 1.5)
     const parseDuration = (dur: string): number => {
       const lower = dur.toLowerCase().trim();
       const hourMatch = lower.match(/([\d.]+)\s*h/);
@@ -146,35 +166,37 @@ export function useDailyPlan(ankiStats: AnkiStats | null) {
       let hours = 0;
       if (hourMatch) hours += parseFloat(hourMatch[1]);
       if (minMatch) hours += parseFloat(minMatch[1]) / 60;
-      if (hours === 0) hours = 0.5; // fallback
+      if (hours === 0) hours = 0.5;
       return Math.round(hours * 100) / 100;
     };
 
-    if (checked) {
-      // Create a StudySession
-      await db.sessions.add({
-        id: crypto.randomUUID(),
-        date: today,
-        skill: task.skill,
-        activity: task.activity,
-        hours: parseDuration(task.duration),
-        location,
-        phase: currentPhase,
-        sourceDailyPlan: today,
-        createdAt: now,
-        updatedAt: now,
-      });
-    } else {
-      // Delete the auto-logged session for this task
-      const sessions = await db.sessions
-        .where("sourceDailyPlan")
-        .equals(today)
-        .toArray();
-      const match = sessions.find((s) => s.activity === task.activity);
-      if (match) await db.sessions.delete(match.id);
+    try {
+      if (checked) {
+        await db.sessions.add({
+          id: crypto.randomUUID(),
+          date: today,
+          skill: task.skill,
+          activity: task.activity,
+          hours: parseDuration(task.duration),
+          location,
+          phase: currentPhase,
+          sourceDailyPlan: today,
+          createdAt: now,
+          updatedAt: now,
+        });
+      } else {
+        const sessions = await db.sessions
+          .where("sourceDailyPlan")
+          .equals(today)
+          .toArray();
+        const match = sessions.find((s) => s.activity === task.activity);
+        if (match) await db.sessions.delete(match.id);
+      }
+    } catch (err) {
+      console.error("[daily-plan] Failed to toggle task session:", err);
+      return;
     }
 
-    // Update completedTasks in state and localStorage
     const prev = plan.completedTasks ?? [];
     const next = checked
       ? [...prev, taskIndex]
