@@ -14,6 +14,7 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
+  Legend,
   ResponsiveContainer,
   ReferenceLine,
 } from "recharts";
@@ -74,6 +75,25 @@ export default function AnalyticsPage() {
       color: SKILL_COLORS[s],
     }));
 
+    const today = new Date();
+    const dailyHistory: Record<string, Record<string, number>>[] = [];
+    for (let i = 27; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      const dateStr = d.toISOString().slice(0, 10);
+      const entry: Record<string, number> = {};
+      for (const skill of SKILLS) entry[skill] = 0;
+      for (const s of sessions) {
+        if (s.date === dateStr) {
+          entry[s.skill] = (entry[s.skill] ?? 0) + s.hours;
+        }
+      }
+      dailyHistory.push({ date: dateStr, label: `${d.getMonth() + 1}/${d.getDate()}`, ...entry } as any);
+    }
+    const activeSkillsInHistory = SKILLS.filter((skill) =>
+      dailyHistory.some((d: any) => (d[skill] ?? 0) > 0)
+    );
+
     return {
       cumulativeData,
       weeklyData,
@@ -81,6 +101,8 @@ export default function AnalyticsPage() {
       hoursByLocation,
       weeklyTarget: config.weeklyTargetHours,
       totalHours: sessions.reduce((sum, s) => sum + s.hours, 0),
+      dailyHistory: dailyHistory as any[],
+      activeSkillsInHistory,
     };
   });
 
@@ -184,6 +206,54 @@ export default function AnalyticsPage() {
                       />
                     ))}
                   </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Daily Study History */}
+        <Card className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle>Daily Study History</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {data.dailyHistory.every((d: any) => data.activeSkillsInHistory.every((s) => d[s] === 0)) ? (
+              <p className="text-sm text-muted-foreground py-8 text-center">
+                No study data in the last 28 days.
+              </p>
+            ) : (
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={data.dailyHistory}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                  <XAxis
+                    dataKey="label"
+                    tick={{ fontSize: 10 }}
+                    stroke="hsl(var(--muted-foreground))"
+                    interval={Math.floor(data.dailyHistory.length / 7) - 1}
+                  />
+                  <YAxis tick={{ fontSize: 12 }} stroke="hsl(var(--muted-foreground))" unit="h" />
+                  <Tooltip
+                    contentStyle={tooltipStyle}
+                    formatter={(value: number, name: string) => [
+                      `${value}h`,
+                      SKILL_LABELS[name as keyof typeof SKILL_LABELS] ?? name,
+                    ]}
+                    labelFormatter={(label) => `Date: ${label}`}
+                  />
+                  <Legend
+                    formatter={(value) => SKILL_LABELS[value as keyof typeof SKILL_LABELS] ?? value}
+                    wrapperStyle={{ fontSize: 11 }}
+                  />
+                  {data.activeSkillsInHistory.map((skill) => (
+                    <Bar
+                      key={skill}
+                      dataKey={skill}
+                      stackId="daily"
+                      fill={SKILL_COLORS[skill]}
+                      radius={0}
+                    />
+                  ))}
                 </BarChart>
               </ResponsiveContainer>
             )}
